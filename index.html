@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>匠算 - 装修项目成本管控工具</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root {
+  --primary: #2c3e50;
+  --primary-light: #34495e;
+  --accent: #e67e22;
+  --accent-hover: #d35400;
+  --success: #27ae60;
+  --danger: #e74c3c;
+  --warning: #f39c12;
+  --info: #3498db;
+  --bg: #f5f6fa;
+  --card-bg: #ffffff;
+  --border: #e0e0e0;
+  --text: #2c3e50;
+  --text-light: #7f8c8d;
+  --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --radius: 10px;
+  --transition: 0.2s ease;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg); color: var(--text); min-height: 100vh;
+}
+/* Header */
+.header {
+  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+  color: #fff; padding: 0 24px; height: 60px;
+  display: flex; align-items: center; justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15); position: sticky; top:0; z-index:100;
+}
+.header .logo { display:flex; align-items:center; gap:10px; font-size:20px; font-weight:700; letter-spacing:1px; }
+.header .logo .icon { width:36px; height:36px; background:var(--accent); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:20px; }
+.header .user-info { display:flex; align-items:center; gap:16px; font-size:14px; }
+.header .user-info .badge { background:var(--accent); padding:4px 12px; border-radius:20px; font-size:12px; }
+/* Layout */
+.app-container { display:flex; height:calc(100vh - 60px); }
+/* Sidebar */
+.sidebar {
+  width:220px; background:var(--card-bg); border-right:1px solid var(--border);
+  display:flex; flex-direction:column; padding:12px 0; flex-shrink:0;
+}
+.sidebar .nav-item {
+  display:flex; align-items:center; gap:10px; padding:12px 20px;
+  cursor:pointer; color:var(--text-light); font-size:14px; transition:var(--transition);
+  border-left:3px solid transparent; margin:2px 0;
+}
+.sidebar .nav-item:hover { background:#f0f1f5; color:var(--text); }
+.sidebar .nav-item.active { color:var(--accent); background:#fef5ee; border-left-color:var(--accent); font-weight:600; }
+.sidebar .nav-item .nav-icon { font-size:18px; width:24px; text-align:center; }
+.sidebar .nav-divider { padding:16px 20px 8px; font-size:11px; color:var(--text-light); text-transform:uppercase; letter-spacing:1px; }
+/* Main Content */
+.main-content { flex:1; overflow-y:auto; padding:24px; }
+/* Cards */
+.card {
+  background:var(--card-bg); border-radius:var(--radius); box-shadow:var(--shadow);
+  padding:20px; margin-bottom:20px;
+}
+.card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+.card-title { font-size:16px; font-weight:600; }
+/* Stats Row */
+.stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
+.stat-card {
+  background:var(--card-bg); border-radius:var(--radius); box-shadow:var(--shadow);
+  padding:20px; display:flex; flex-direction:column; gap:8px;
+}
+.stat-card .stat-label { font-size:13px; color:var(--text-light); }
+.stat-card .stat-value { font-size:28px; font-weight:700; }
+.stat-card .stat-sub { font-size:12px; color:var(--text-light); }
+.stat-card.accent .stat-value { color:var(--accent); }
+.stat-card.success .stat-value { color:var(--success); }
+.stat-card.danger .stat-value { color:var(--danger); }
+.stat-card.info .stat-value { color:var(--info); }
+/* Buttons */
+.btn {
+  padding:8px 16px; border:none; border-radius:6px; cursor:pointer;
+  font-size:13px; font-weight:500; transition:var(--transition); display:inline-flex; align-items:center; gap:6px;
+}
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover { background:var(--accent-hover); }
+.btn-success { background:var(--success); color:#fff; }
+.btn-success:hover { background:#219a52; }
+.btn-danger { background:var(--danger); color:#fff; }
+.btn-danger:hover { background:#c0392b; }
+.btn-info { background:var(--info); color:#fff; }
+.btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+.btn-outline:hover { background:#f0f1f5; }
+.btn-sm { padding:4px 10px; font-size:12px; }
+.btn-xs { padding:2px 8px; font-size:11px; border-radius:4px; }
+/* Form */
+.form-group { margin-bottom:14px; }
+.form-group label { display:block; font-size:13px; font-weight:500; margin-bottom:4px; color:var(--text-light); }
+.form-group input, .form-group select, .form-group textarea {
+  width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px;
+  font-size:14px; transition:var(--transition); font-family:inherit;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(230,126,34,0.1); }
+.form-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.form-row-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+/* Tables */
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+table th { background:#f8f9fa; padding:10px 12px; text-align:left; font-weight:600; color:var(--text-light); border-bottom:2px solid var(--border); white-space:nowrap; }
+table td { padding:10px 12px; border-bottom:1px solid var(--border); }
+table tr:hover td { background:#fef9f3; }
+/* Tags */
+.tag { display:inline-block; padding:2px 10px; border-radius:12px; font-size:11px; font-weight:500; }
+.tag-primary { background:#e8f4fd; color:#2980b9; }
+.tag-success { background:#e8f8e8; color:#27ae60; }
+.tag-warning { background:#fef5e7; color:#f39c12; }
+.tag-danger { background:#fdeaea; color:#e74c3c; }
+.tag-gray { background:#f0f0f0; color:#7f8c8d; }
+/* Modal */
+.modal-overlay {
+  display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+  background:rgba(0,0,0,0.5); z-index:200; justify-content:center; align-items:center;
+}
+.modal-overlay.show { display:flex; }
+.modal {
+  background:#fff; border-radius:var(--radius); width:90%; max-width:600px; max-height:85vh;
+  overflow-y:auto; box-shadow:0 10px 40px rgba(0,0,0,0.2);
+}
+.modal-header {
+  padding:16px 20px; border-bottom:1px solid var(--border);
+  display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; background:#fff; z-index:1;
+}
+.modal-header h3 { font-size:16px; }
+.modal-close { background:none; border:none; font-size:22px; cursor:pointer; color:var(--text-light); }
+.modal-body { padding:20px; }
+.modal-footer { padding:16px 20px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; }
+/* Tabs */
+.tabs { display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:16px; }
+.tab {
+  padding:8px 20px; cursor:pointer; font-size:13px; color:var(--text-light);
+  border-bottom:2px solid transparent; margin-bottom:-2px; transition:var(--transition);
+}
+.tab:hover { color:var(--text); }
+.tab.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+/* Filter Bar */
+.filter-bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+.filter-bar select, .filter-bar input { padding:6px 12px; border:1px solid var(--border); border-radius:6px; font-size:13px; }
+/* Empty State */
+.empty-state { text-align:center; padding:40px 20px; color:var(--text-light); }
+.empty-state .empty-icon { font-size:48px; margin-bottom:12px; }
+.empty-state p { font-size:14px; margin-bottom:16px; }
+/* Chart Container */
+.chart-container { width:100%; height:350px; }
+/* Toast */
+.toast {
+  position:fixed; top:80px; right:24px; z-index:300; padding:12px 20px;
+  border-radius:8px; color:#fff; font-size:14px; box-shadow:0 4px 12px rgba(0,0,0,0.2);
+  transform:translateX(120%); transition:transform 0.3s ease;
+}
+.toast.show { transform:translateX(0); }
+.toast.success { background:var(--success); }
+.toast.error { background:var(--danger); }
+.toast.warning { background:var(--warning); }
+/* Responsive */
+@media (max-width:768px) {
+  .sidebar { width:60px; }
+  .sidebar .nav-item span:not(.nav-icon) { display:none; }
+  .sidebar .nav-divider { display:none; }
+  .stats-row { grid-template-columns:repeat(2,1fr); }
+  .form-row, .form-row-3 { grid-template-columns:1fr; }
+}
+/* Status dots */
+.status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; }
+.status-dot.active { background:var(--success); }
+.status-dot.warning { background:var(--warning); }
+.status-dot.danger { background:var(--danger); }
+/* Print / export */
+@media print {
+  .sidebar, .header, .btn, .filter-bar, .tabs { display:none !important; }
+  .main-content { padding:0; }
+  .card { box-shadow:none; border:1px solid #ccc; break-inside:avoid; }
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">
+    <div class="icon">匠</div>
+    <span>匠算</span>
+  </div>
+  <div class="user-info">
+    <span>📅 <span id="currentDate"></span></span>
+    <span class="badge">免费版</span>
+  </div>
+</div>
+
+<!-- App Container -->
+<div class="app-container">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="nav-divider">主菜单</div>
+    <div class="nav-item active" data-page="dashboard">
+      <span class="nav-icon">📊</span> <span>工作台</span>
+    </div>
+    <div class="nav-item" data-page="projects">
+      <span class="nav-icon">📁</span> <span>项目管理</span>
+    </div>
+    <div class="nav-divider">成本管理</div>
+    <div class="nav-item" data-page="costs">
+      <span class="nav-icon">💰</span> <span>成本记录</span>
+    </div>
+    <div class="nav-item" data-page="transactions">
+      <span class="nav-icon">💳</span> <span>收支账款</span>
+    </div>
+    <div class="nav-divider">数据分析</div>
+    <div class="nav-item" data-page="reports">
+      <span class="nav-icon">📈</span> <span>报表统计</span>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main-content" id="mainContent">
+    <!-- Pages will be rendered here -->
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modalBox"></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ==================== 数据管理 ====================
+const STORAGE_KEY = 'jiangSuan_data';
+
+function getDefaultData() {
+  return {
+    projects: [],
+    costRecords: [],
+    transactions: [],
+    nextIds: { project: 1, cost: 1, transaction: 1 }
+  };
+}
+
+function loadData() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw) {
+    try { return JSON.parse(raw); } catch(e) {}
+  }
+  // 首次使用添加示例数据
+  const data = getDefaultData();
+  data.projects = [
+    { id:1, name:'阳光花园3-502', clientName:'张先生', contractAmount:180000, address:'阳光花园3栋502室', startDate:'2026-05-10', endDate:'2026-07-20', status:1, createdAt:'2026-05-10' },
+    { id:2, name:'翠竹苑2-1101', clientName:'李女士', contractAmount:250000, address:'翠竹苑2栋1101室', startDate:'2026-06-01', endDate:'2026-08-15', status:1, createdAt:'2026-06-01' },
+  ];
+  data.nextIds.project = 3;
+  data.costRecords = [
+    { id:1, projectId:1, costType:1, category:'水电材料', amount:8500, quantity:1, unitPrice:8500, supplier:'伟星管业', recordDate:'2026-05-15', description:'水管、电线、线管', attachmentUrl:'', createdAt:'2026-05-15' },
+    { id:2, projectId:1, costType:1, category:'瓷砖', amount:12000, quantity:80, unitPrice:150, supplier:'东鹏瓷砖', recordDate:'2026-05-18', description:'客厅地砖60x60', attachmentUrl:'', createdAt:'2026-05-18' },
+    { id:3, projectId:1, costType:2, category:'水电工', amount:6000, quantity:15, unitPrice:400, supplier:'王师傅团队', recordDate:'2026-05-20', description:'水电改造人工', attachmentUrl:'', createdAt:'2026-05-20' },
+    { id:4, projectId:1, costType:2, category:'木工', amount:9500, quantity:20, unitPrice:475, supplier:'李师傅团队', recordDate:'2026-06-05', description:'吊顶、衣柜制作', attachmentUrl:'', createdAt:'2026-06-05' },
+    { id:5, projectId:1, costType:4, category:'运输费', amount:1200, quantity:1, unitPrice:1200, supplier:'顺达物流', recordDate:'2026-05-16', description:'材料运输', attachmentUrl:'', createdAt:'2026-05-16' },
+    { id:6, projectId:2, costType:1, category:'水泥沙子', amount:3500, quantity:1, unitPrice:3500, supplier:'建华建材', recordDate:'2026-06-03', description:'水泥、沙子、砖', attachmentUrl:'', createdAt:'2026-06-03' },
+    { id:7, projectId:2, costType:3, category:'增值税', amount:5400, quantity:1, unitPrice:5400, supplier:'税务局', recordDate:'2026-06-10', description:'材料采购增值税', attachmentUrl:'', createdAt:'2026-06-10' },
+  ];
+  data.nextIds.cost = 8;
+  data.transactions = [
+    { id:1, projectId:1, type:1, amount:72000, category:'首期款', transactionDate:'2026-05-10', payer:'张先生', isReceived:1, dueDate:'2026-05-10', status:1, description:'合同签订首期款40%', createdAt:'2026-05-10' },
+    { id:2, projectId:1, type:1, amount:54000, category:'中期款', transactionDate:'', payer:'张先生', isReceived:0, dueDate:'2026-06-20', status:2, description:'中期款30%', createdAt:'2026-05-10' },
+    { id:3, projectId:1, type:1, amount:54000, category:'尾款', transactionDate:'', payer:'张先生', isReceived:0, dueDate:'2026-07-25', status:0, description:'尾款30%', createdAt:'2026-05-10' },
+    { id:4, projectId:2, type:1, amount:100000, category:'首期款', transactionDate:'2026-06-01', payer:'李女士', isReceived:1, dueDate:'2026-06-01', status:1, description:'首期款40%', createdAt:'2026-06-01' },
+    { id:5, projectId:2, type:1, amount:75000, category:'中期款', transactionDate:'', payer:'李女士', isReceived:0, dueDate:'2026-07-15', status:0, description:'中期款30%', createdAt:'2026-06-01' },
+  ];
+  data.nextIds.transaction = 6;
+  saveData(data);
+  return data;
+}
+
+function saveData(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+function getData() { return loadData(); }
+
+// ==================== 工具函数 ====================
+function formatMoney(n) { return '¥' + Number(n).toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function formatDate(d) { if(!d) return '-'; const dt = new Date(d); return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); }
+function today() { return new Date().toISOString().split('T')[0]; }
+
+const COST_TYPES = { 1:'材料成本', 2:'人工成本', 3:'税费', 4:'其他成本' };
+const COST_ICONS = { 1:'🧱', 2:'👷', 3:'📋', 4:'📦' };
+const PROJECT_STATUS = { 1:'进行中', 2:'已完工', 3:'已结算' };
+const TRANS_STATUS = { 0:'待收', 1:'已收', 2:'逾期' };
+const TRANS_STATUS_CLASS = { 0:'tag-warning', 1:'tag-success', 2:'tag-danger' };
+
+function showToast(msg, type='success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast ' + type + ' show';
+  setTimeout(()=>{ t.classList.remove('show'); }, 2500);
+}
+
+function openModal(title, bodyHtml, footerHtml='') {
+  document.getElementById('modalBox').innerHTML = `
+    <div class="modal-header"><h3>${title}</h3><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">${bodyHtml}</div>
+    ${footerHtml ? '<div class="modal-footer">'+footerHtml+'</div>' : ''}
+  `;
+  document.getElementById('modalOverlay').classList.add('show');
+}
+function closeModal() { document.getElementById('modalOverlay').classList.remove('show'); }
+
+// ==================== 页面导航 ====================
+let currentPage = 'dashboard';
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', ()=>{
+    document.querySelectorAll('.nav-item').forEach(i=>i.classList.remove('active'));
+    item.classList.add('active');
+    currentPage = item.dataset.page;
+    renderPage();
+  });
+});
+
+function renderPage() {
+  const data = getData();
+  const container = document.getElementById('mainContent');
+  switch(currentPage) {
+    case 'dashboard': container.innerHTML = renderDashboard(data); initDashboardCharts(data); break;
+    case 'projects': container.innerHTML = renderProjects(data); break;
+    case 'costs': container.innerHTML = renderCosts(data); break;
+    case 'transactions': container.innerHTML = renderTransactions(data); break;
+    case 'reports': container.innerHTML = renderReports(data); initReportCharts(data); break;
+  }
+}
+
+// ==================== 工作台 ====================
+function renderDashboard(data) {
+  const totalProjects = data.projects.length;
+  const activeProjects = data.projects.filter(p=>p.status===1).length;
+  let totalCost = 0, totalIncome = 0, totalReceivable = 0;
+  data.costRecords.forEach(c=> totalCost += c.amount);
+  data.transactions.forEach(t=>{
+    if(t.type===1 && t.isReceived===1) totalIncome += t.amount;
+    if(t.type===1 && t.isReceived===0) totalReceivable += t.amount;
+  });
+
+  const overdueItems = data.transactions.filter(t=>t.status===2 || (t.isReceived===0 && t.dueDate < today()));
+  const alertHtml = overdueItems.length > 0 ? overdueItems.map(t=>{
+    const p = data.projects.find(pr=>pr.id===t.projectId);
+    return `<tr><td>${p?p.name:'未知项目'}</td><td>${t.category}</td><td>${formatMoney(t.amount)}</td><td>${formatDate(t.dueDate)}</td><td><span class="tag tag-danger">${t.status===2?'逾期':'即将到期'}</span></td></tr>`;
+  }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text-light)">暂无预警项</td></tr>';
+
+  return `
+    <h2 style="margin-bottom:20px;">📊 工作台</h2>
+    <div class="stats-row">
+      <div class="stat-card info"><div class="stat-label">项目总数</div><div class="stat-value">${totalProjects}</div><div class="stat-sub">进行中 ${activeProjects} 个</div></div>
+      <div class="stat-card danger"><div class="stat-label">总成本支出</div><div class="stat-value">${formatMoney(totalCost)}</div><div class="stat-sub">所有项目累计</div></div>
+      <div class="stat-card success"><div class="stat-label">已收款项</div><div class="stat-value">${formatMoney(totalIncome)}</div><div class="stat-sub">实收总额</div></div>
+      <div class="stat-card accent"><div class="stat-label">应收账款</div><div class="stat-value">${formatMoney(totalReceivable)}</div><div class="stat-sub">待收总额</div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div class="card">
+        <div class="card-header"><div class="card-title">📈 各项目成本分布</div></div>
+        <div class="chart-container" id="chartProjectCost"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">🔔 应收预警</div></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>项目</th><th>款项类别</th><th>金额</th><th>应收日期</th><th>状态</th></tr></thead>
+          <tbody>${alertHtml}</tbody>
+        </table></div>
+      </div>
+    </div>
+  `;
+}
+
+function initDashboardCharts(data) {
+  const chartDom = document.getElementById('chartProjectCost');
+  if(!chartDom) return;
+  const chart = echarts.init(chartDom);
+  const projectCostMap = {};
+  data.costRecords.forEach(c=>{
+    const p = data.projects.find(pr=>pr.id===c.projectId);
+    const pname = p ? p.name : '未知';
+    projectCostMap[pname] = (projectCostMap[pname]||0) + c.amount;
+  });
+  chart.setOption({
+    tooltip: { trigger:'item', formatter: p=>`${p.name}: ${formatMoney(p.value)}` },
+    series: [{
+      type:'pie', radius:['45%','75%'], center:['50%','55%'],
+      data: Object.entries(projectCostMap).map(([k,v])=>({name:k,value:v})),
+      label: { formatter:'{b}\n{d}%' },
+      emphasis: { itemStyle:{shadowBlur:10,shadowColor:'rgba(0,0,0,0.3)'} }
+    }]
+  });
+}
+
+// ==================== 项目管理 ====================
+function renderProjects(data) {
+  const filterStatus = '<select id="filterProjectStatus" onchange="renderPage()"><option value="all">全部状态</option><option value="1">进行中</option><option value="2">已完工</option><option value="3">已结算</option></select>';
+  let rows = '';
+  const filtered = data.projects.filter(p=>{
+    const sel = document.getElementById('filterProjectStatus');
+    return !sel || sel.value==='all' || p.status==parseInt(sel.value);
+  });
+  filtered.forEach(p=>{
+    const totalCost = data.costRecords.filter(c=>c.projectId===p.id).reduce((s,c)=>s+c.amount,0);
+    const totalIncome = data.transactions.filter(t=>t.projectId===p.id&&t.type===1&&t.isReceived===1).reduce((s,t)=>s+t.amount,0);
+    const profit = totalIncome - totalCost;
+    const profitClass = profit >= 0 ? 'tag-success' : 'tag-danger';
+    rows += `<tr>
+      <td><strong>${p.name}</strong></td>
+      <td>${p.clientName}</td>
+      <td>${formatMoney(p.contractAmount)}</td>
+      <td>${formatMoney(totalCost)}</td>
+      <td>${formatMoney(totalIncome)}</td>
+      <td><span class="tag ${profitClass}">${formatMoney(profit)}</span></td>
+      <td><span class="tag ${p.status===1?'tag-primary':p.status===2?'tag-warning':'tag-gray'}">${PROJECT_STATUS[p.status]}</span></td>
+      <td>${formatDate(p.startDate)}</td>
+      <td>
+        <button class="btn btn-sm btn-outline" onclick="editProject(${p.id})">编辑</button>
+        <button class="btn btn-sm btn-outline" onclick="viewProjectDetail(${p.id})">详情</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteProject(${p.id})">删除</button>
+      </td>
+    </tr>`;
+  });
+
+  return `
+    <h2 style="margin-bottom:20px;">📁 项目管理</h2>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">项目列表</div>
+        <div style="display:flex;gap:8px;">
+          <div class="filter-bar" style="margin:0;">${filterStatus}</div>
+          <button class="btn btn-primary" onclick="showProjectForm()">+ 新建项目</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>项目名称</th><th>客户</th><th>合同金额</th><th>总成本</th><th>已收款</th><th>利润</th><th>状态</th><th>开工日期</th><th>操作</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="9" style="text-align:center;color:var(--text-light);padding:30px;">暂无项目数据，点击"新建项目"开始</td></tr>'}</tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+function showProjectForm(project=null) {
+  const isEdit = !!project;
+  const title = isEdit ? '编辑项目' : '新建项目';
+  const body = `
+    <div class="form-row">
+      <div class="form-group"><label>项目名称 *</label><input id="projName" value="${project?project.name:''}"></div>
+      <div class="form-group"><label>客户名称 *</label><input id="projClient" value="${project?project.clientName:''}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>合同金额 *</label><input id="projAmount" type="number" step="0.01" value="${project?project.contractAmount:''}"></div>
+      <div class="form-group"><label>项目地址</label><input id="projAddr" value="${project?project.address:''}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>开工日期</label><input id="projStart" type="date" value="${project?project.startDate:''}"></div>
+      <div class="form-group"><label>预计完工日期</label><input id="projEnd" type="date" value="${project?project.endDate:''}"></div>
+    </div>
+    <div class="form-group"><label>项目状态</label>
+      <select id="projStatus">${Object.entries(PROJECT_STATUS).map(([k,v])=>`<option value="${k}" ${project&&project.status==k?'selected':''}>${v}</option>`).join('')}</select>
+    </div>
+  `;
+  const footer = `<button class="btn btn-outline" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="saveProject(${isEdit?project.id:'null'})">保存</button>`;
+  openModal(title, body, footer);
+}
+
+function saveProject(editId) {
+  const data = getData();
+  const name = document.getElementById('projName').value.trim();
+  const clientName = document.getElementById('projClient').value.trim();
+  const contractAmount = parseFloat(document.getElementById('projAmount').value) || 0;
+  if(!name || !clientName || !contractAmount) { showToast('请填写必填字段','warning'); return; }
+
+  const project = {
+    id: editId || data.nextIds.project++,
+    name, clientName, contractAmount,
+    address: document.getElementById('projAddr').value,
+    startDate: document.getElementById('projStart').value,
+    endDate: document.getElementById('projEnd').value,
+    status: parseInt(document.getElementById('projStatus').value),
+    createdAt: editId ? (data.projects.find(p=>p.id===editId)?.createdAt || today()) : today()
+  };
+
+  if(editId) {
+    const idx = data.projects.findIndex(p=>p.id===editId);
+    if(idx>=0) data.projects[idx] = project;
+  } else {
+    data.projects.push(project);
+  }
+  saveData(data);
+  closeModal();
+  showToast(editId?'项目已更新':'项目已创建');
+  renderPage();
+}
+
+function editProject(id) {
+  const data = getData();
+  const p = data.projects.find(p=>p.id===id);
+  if(p) showProjectForm(p);
+}
+
+function deleteProject(id) {
+  if(!confirm('确定要删除此项目吗？关联的成本和收支记录也将一并删除。')) return;
+  const data = getData();
+  data.projects = data.projects.filter(p=>p.id!==id);
+  data.costRecords = data.costRecords.filter(c=>c.projectId!==id);
+  data.transactions = data.transactions.filter(t=>t.projectId!==id);
+  saveData(data);
+  showToast('项目已删除','warning');
+  renderPage();
+}
+
+function viewProjectDetail(id) {
+  const data = getData();
+  const p = data.projects.find(p=>p.id===id);
+  if(!p) return;
+  const costs = data.costRecords.filter(c=>c.projectId===id);
+  const totalCost = costs.reduce((s,c)=>s+c.amount,0);
+  const txns = data.transactions.filter(t=>t.projectId===id);
+  const totalIncome = txns.filter(t=>t.type===1&&t.isReceived===1).reduce((s,t)=>s+t.amount,0);
+  const totalReceivable = txns.filter(t=>t.type===1&&t.isReceived===0).reduce((s,t)=>s+t.amount,0);
+  const profit = totalIncome - totalCost;
+
+  const costRows = costs.map(c=>`<tr><td>${COST_ICONS[c.costType]} ${COST_TYPES[c.costType]}</td><td>${c.category}</td><td>${c.quantity}</td><td>${formatMoney(c.unitPrice)}</td><td>${formatMoney(c.amount)}</td><td>${c.supplier||'-'}</td><td>${formatDate(c.recordDate)}</td></tr>`).join('') || '<tr><td colspan="7" style="text-align:center;">暂无成本记录</td></tr>';
+
+  const txnRows = txns.map(t=>`<tr><td>${t.type===1?'💰收入':'💸支出'}</td><td>${t.category}</td><td>${formatMoney(t.amount)}</td><td>${t.payer||'-'}</td><td>${formatDate(t.dueDate)}</td><td><span class="tag ${TRANS_STATUS_CLASS[t.status]}">${TRANS_STATUS[t.status]}</span></td></tr>`).join('') || '<tr><td colspan="6" style="text-align:center;">暂无收支记录</td></tr>';
+
+  const body = `
+    <div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px;">
+      <div class="stat-card"><div class="stat-label">合同金额</div><div class="stat-value" style="font-size:20px;">${formatMoney(p.contractAmount)}</div></div>
+      <div class="stat-card danger"><div class="stat-label">总成本</div><div class="stat-value" style="font-size:20px;">${formatMoney(totalCost)}</div></div>
+      <div class="stat-card success"><div class="stat-label">已收款</div><div class="stat-value" style="font-size:20px;">${formatMoney(totalIncome)}</div></div>
+      <div class="stat-card accent"><div class="stat-label">预计利润</div><div class="stat-value" style="font-size:20px;">${formatMoney(profit)}</div></div>
+    </div>
+    <p style="font-size:13px;color:var(--text-light);margin-bottom:12px;">
+      客户：${p.clientName} | 地址：${p.address||'-'} | 状态：${PROJECT_STATUS[p.status]} | 开工：${formatDate(p.startDate)} | 预计完工：${formatDate(p.endDate)}
+    </p>
+    <h4 style="margin:16px 0 8px;">📋 成本明细</h4>
+    <div class="table-wrap"><table><thead><tr><th>成本类型</th><th>分类</th><th>数量</th><th>单价</th><th>金额</th><th>供应商</th><th>日期</th></tr></thead><tbody>${costRows}</tbody></table></div>
+    <h4 style="margin:16px 0 8px;">💳 收支明细</h4>
+    <div class="table-wrap"><table><thead><tr><th>类型</th><th>类别</th><th>金额</th><th>付款方</th><th>应收日期</th><th>状态</th></tr></thead><tbody>${txnRows}</tbody></table></div>
+  `;
+  openModal(`📁 ${p.name} - 项目详情`, body);
+}
+
+// ==================== 成本记录 ====================
+function renderCosts(data) {
+  const projectOptions = '<option value="all">全部项目</option>' + data.projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  const costTypeOptions = '<option value="all">全部类型</option>' + Object.entries(COST_TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+
+  const filterBar = `
+    <select id="filterCostProject" onchange="renderPage()">${projectOptions}</select>
+    <select id="filterCostType" onchange="renderPage()">${costTypeOptions}</select>
+  `;
+
+  let filtered = data.costRecords;
+  const selProj = document.getElementById('filterCostProject');
+  const selType = document.getElementById('filterCostType');
+  if(selProj && selProj.value!=='all') filtered = filtered.filter(c=>c.projectId==parseInt(selProj.value));
+  if(selType && selType.value!=='all') filtered = filtered.filter(c=>c.costType==parseInt(selType.value));
+
+  const rows = filtered.map(c=>{
+    const p = data.projects.find(pr=>pr.id===c.projectId);
+    return `<tr>
+      <td>${p?p.name:'未知'}</td>
+      <td>${COST_ICONS[c.costType]} ${COST_TYPES[c.costType]}</td>
+      <td>${c.category}</td>
+      <td>${c.quantity}</td>
+      <td>${formatMoney(c.unitPrice)}</td>
+      <td>${formatMoney(c.amount)}</td>
+      <td>${c.supplier||'-'}</td>
+      <td>${formatDate(c.recordDate)}</td>
+      <td>
+        <button class="btn btn-sm btn-outline" onclick="editCost(${c.id})">编辑</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteCost(${c.id})">删除</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text-light);padding:30px;">暂无成本记录</td></tr>';
+
+  return `
+    <h2 style="margin-bottom:20px;">💰 成本记录</h2>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">成本明细列表</div>
+        <div style="display:flex;gap:8px;">
+          <div class="filter-bar" style="margin:0;">${filterBar}</div>
+          <button class="btn btn-primary" onclick="showCostForm()">+ 新增成本</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>项目</th><th>成本类型</th><th>分类</th><th>数量</th><th>单价</th><th>金额</th><th>供应商</th><th>日期</th><th>操作</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+function showCostForm(cost=null) {
+  const data = getData();
+  const isEdit = !!cost;
+  const title = isEdit ? '编辑成本记录' : '新增成本记录';
+  const projectOptions = data.projects.map(p=>`<option value="${p.id}" ${cost&&cost.projectId===p.id?'selected':''}>${p.name}</option>`).join('');
+  const body = `
+    <div class="form-group"><label>关联项目 *</label><select id="costProject">${projectOptions}</select></div>
+    <div class="form-row">
+      <div class="form-group"><label>成本类型 *</label>
+        <select id="costType">${Object.entries(COST_TYPES).map(([k,v])=>`<option value="${k}" ${cost&&cost.costType==k?'selected':''}>${v}</option>`).join('')}</select>
+      </div>
+      <div class="form-group"><label>具体分类</label><input id="costCategory" value="${cost?cost.category:''}" placeholder="如：水电材料、木工"></div>
+    </div>
+    <div class="form-row-3">
+      <div class="form-group"><label>数量</label><input id="costQty" type="number" step="0.01" value="${cost?cost.quantity:''}"></div>
+      <div class="form-group"><label>单价</label><input id="costUnitPrice" type="number" step="0.01" value="${cost?cost.unitPrice:''}"></div>
+      <div class="form-group"><label>金额 *</label><input id="costAmount" type="number" step="0.01" value="${cost?cost.amount:''}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>供应商/施工方</label><input id="costSupplier" value="${cost?cost.supplier:''}"></div>
+      <div class="form-group"><label>记录日期</label><input id="costDate" type="date" value="${cost?cost.recordDate:today()}"></div>
+    </div>
+    <div class="form-group"><label>备注</label><textarea id="costDesc" rows="2">${cost?cost.description||'':''}</textarea></div>
+  `;
+  const footer = `<button class="btn btn-outline" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="saveCost(${isEdit?cost.id:'null'})">保存</button>`;
+  openModal(title, body, footer);
+}
+
+function saveCost(editId) {
+  const data = getData();
+  const projectId = parseInt(document.getElementById('costProject').value);
+  const costType = parseInt(document.getElementById('costType').value);
+  const amount = parseFloat(document.getElementById('costAmount').value) || 0;
+  if(!projectId || !amount) { showToast('请填写必填字段','warning'); return; }
+
+  const cost = {
+    id: editId || data.nextIds.cost++,
+    projectId, costType,
+    category: document.getElementById('costCategory').value,
+    amount,
+    quantity: parseFloat(document.getElementById('costQty').value) || 0,
+    unitPrice: parseFloat(document.getElementById('costUnitPrice').value) || 0,
+    supplier: document.getElementById('costSupplier').value,
+    recordDate: document.getElementById('costDate').value || today(),
+    description: document.getElementById('costDesc').value,
+    attachmentUrl: '',
+    createdAt: editId ? (data.costRecords.find(c=>c.id===editId)?.createdAt || today()) : today()
+  };
+
+  if(editId) {
+    const idx = data.costRecords.findIndex(c=>c.id===editId);
+    if(idx>=0) data.costRecords[idx] = cost;
+  } else {
+    data.costRecords.push(cost);
+  }
+  saveData(data);
+  closeModal();
+  showToast(editId?'成本记录已更新':'成本记录已添加');
+  renderPage();
+}
+
+function editCost(id) {
+  const data = getData();
+  const c = data.costRecords.find(c=>c.id===id);
+  if(c) showCostForm(c);
+}
+
+function deleteCost(id) {
+  if(!confirm('确定要删除此成本记录吗？')) return;
+  const data = getData();
+  data.costRecords = data.costRecords.filter(c=>c.id!==id);
+  saveData(data);
+  showToast('成本记录已删除','warning');
+  renderPage();
+}
+
+// ==================== 收支账款 ====================
+function renderTransactions(data) {
+  const projectOptions = '<option value="all">全部项目</option>' + data.projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  const statusOptions = '<option value="all">全部状态</option><option value="0">待收</option><option value="1">已收</option><option value="2">逾期</option>';
+  const typeOptions = '<option value="all">全部类型</option><option value="1">收入</option><option value="2">支出</option>';
+
+  const filterBar = `
+    <select id="filterTxnProject" onchange="renderPage()">${projectOptions}</select>
+    <select id="filterTxnStatus" onchange="renderPage()">${statusOptions}</select>
+    <select id="filterTxnType" onchange="renderPage()">${typeOptions}</select>
+  `;
+
+  let filtered = data.transactions;
+  const selProj = document.getElementById('filterTxnProject');
+  const selStatus = document.getElementById('filterTxnStatus');
+  const selType = document.getElementById('filterTxnType');
+  if(selProj && selProj.value!=='all') filtered = filtered.filter(t=>t.projectId==parseInt(selProj.value));
+  if(selStatus && selStatus.value!=='all') filtered = filtered.filter(t=>t.status==parseInt(selStatus.value));
+  if(selType && selType.value!=='all') filtered = filtered.filter(t=>t.type==parseInt(selType.value));
+
+  const rows = filtered.map(t=>{
+    const p = data.projects.find(pr=>pr.id===t.projectId);
+    return `<tr>
+      <td>${p?p.name:'未知'}</td>
+      <td>${t.type===1?'💰 收入':'💸 支出'}</td>
+      <td>${t.category}</td>
+      <td>${formatMoney(t.amount)}</td>
+      <td>${t.payer||'-'}</td>
+      <td>${formatDate(t.dueDate)}</td>
+      <td><span class="tag ${TRANS_STATUS_CLASS[t.status]}">${TRANS_STATUS[t.status]}</span></td>
+      <td>${t.isReceived ? formatDate(t.transactionDate) : '-'}</td>
+      <td>
+        ${t.isReceived===0 ? `<button class="btn btn-sm btn-success" onclick="markReceived(${t.id})">标记已收</button>` : ''}
+        <button class="btn btn-sm btn-outline" onclick="editTransaction(${t.id})">编辑</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteTransaction(${t.id})">删除</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text-light);padding:30px;">暂无收支记录</td></tr>';
+
+  return `
+    <h2 style="margin-bottom:20px;">💳 收支账款管理</h2>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">收支记录列表</div>
+        <div style="display:flex;gap:8px;">
+          <div class="filter-bar" style="margin:0;">${filterBar}</div>
+          <button class="btn btn-primary" onclick="showTransactionForm()">+ 新增收支</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>项目</th><th>类型</th><th>类别</th><th>金额</th><th>付款方</th><th>应收日期</th><th>状态</th><th>实收日期</th><th>操作</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+function showTransactionForm(txn=null) {
+  const data = getData();
+  const isEdit = !!txn;
+  const title = isEdit ? '编辑收支记录' : '新增收支记录';
+  const projectOptions = data.projects.map(p=>`<option value="${p.id}" ${txn&&txn.projectId===p.id?'selected':''}>${p.name}</option>`).join('');
+  const body = `
+    <div class="form-group"><label>关联项目 *</label><select id="txnProject">${projectOptions}</select></div>
+    <div class="form-row">
+      <div class="form-group"><label>类型 *</label>
+        <select id="txnType">${[{v:1,l:'收入'},{v:2,l:'支出'}].map(o=>`<option value="${o.v}" ${txn&&txn.type===o.v?'selected':''}>${o.l}</option>`).join('')}</select>
+      </div>
+      <div class="form-group"><label>类别</label><input id="txnCategory" value="${txn?txn.category:''}" placeholder="如：首期款、尾款"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>金额 *</label><input id="txnAmount" type="number" step="0.01" value="${txn?txn.amount:''}"></div>
+      <div class="form-group"><label>付款方</label><input id="txnPayer" value="${txn?txn.payer:''}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>应收/应付日期</label><input id="txnDueDate" type="date" value="${txn?txn.dueDate:''}"></div>
+      <div class="form-group"><label>是否已收</label>
+        <select id="txnReceived">${[{v:0,l:'未收'},{v:1,l:'已收'}].map(o=>`<option value="${o.v}" ${txn&&txn.isReceived===o.v?'selected':''}>${o.l}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="form-group"><label>备注</label><textarea id="txnDesc" rows="2">${txn?txn.description||'':''}</textarea></div>
+  `;
+  const footer = `<button class="btn btn-outline" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="saveTransaction(${isEdit?txn.id:'null'})">保存</button>`;
+  openModal(title, body, footer);
+}
+
+function saveTransaction(editId) {
+  const data = getData();
+  const projectId = parseInt(document.getElementById('txnProject').value);
+  const type = parseInt(document.getElementById('txnType').value);
+  const amount = parseFloat(document.getElementById('txnAmount').value) || 0;
+  if(!projectId || !amount) { showToast('请填写必填字段','warning'); return; }
+
+  const isReceived = parseInt(document.getElementById('txnReceived').value);
+  const dueDate = document.getElementById('txnDueDate').value;
+  let status = isReceived===1 ? 1 : 0;
+  if(isReceived===0 && dueDate && dueDate < today()) status = 2;
+
+  const txn = {
+    id: editId || data.nextIds.transaction++,
+    projectId, type, amount,
+    category: document.getElementById('txnCategory').value,
+    transactionDate: isReceived===1 ? (document.getElementById('txnDueDate').value || today()) : '',
+    payer: document.getElementById('txnPayer').value,
+    isReceived, dueDate,
+    status,
+    description: document.getElementById('txnDesc').value,
+    createdAt: editId ? (data.transactions.find(t=>t.id===editId)?.createdAt || today()) : today()
+  };
+
+  if(editId) {
+    const idx = data.transactions.findIndex(t=>t.id===editId);
+    if(idx>=0) data.transactions[idx] = txn;
+  } else {
+    data.transactions.push(txn);
+  }
+  saveData(data);
+  closeModal();
+  showToast(editId?'收支记录已更新':'收支记录已添加');
+  renderPage();
+}
+
+function editTransaction(id) {
+  const data = getData();
+  const t = data.transactions.find(t=>t.id===id);
+  if(t) showTransactionForm(t);
+}
+
+function deleteTransaction(id) {
+  if(!confirm('确定要删除此收支记录吗？')) return;
+  const data = getData();
+  data.transactions = data.transactions.filter(t=>t.id!==id);
+  saveData(data);
+  showToast('收支记录已删除','warning');
+  renderPage();
+}
+
+function markReceived(id) {
+  const data = getData();
+  const t = data.transactions.find(t=>t.id===id);
+  if(!t) return;
+  t.isReceived = 1;
+  t.status = 1;
+  t.transactionDate = today();
+  saveData(data);
+  showToast('已标记为已收');
+  renderPage();
+}
+
+// ==================== 报表统计 ====================
+function renderReports(data) {
+  return `
+    <h2 style="margin-bottom:20px;">📈 报表统计</h2>
+    <div class="stats-row">
+      <div class="stat-card info"><div class="stat-label">项目总数</div><div class="stat-value">${data.projects.length}</div></div>
+      <div class="stat-card success"><div class="stat-label">总收款</div><div class="stat-value">${formatMoney(data.transactions.filter(t=>t.type===1&&t.isReceived===1).reduce((s,t)=>s+t.amount,0))}</div></div>
+      <div class="stat-card danger"><div class="stat-label">总成本</div><div class="stat-value">${formatMoney(data.costRecords.reduce((s,c)=>s+c.amount,0))}</div></div>
+      <div class="stat-card accent"><div class="stat-label">待收款</div><div class="stat-value">${formatMoney(data.transactions.filter(t=>t.type===1&&t.isReceived===0).reduce((s,t)=>s+t.amount,0))}</div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div class="card">
+        <div class="card-header"><div class="card-title">📊 成本类型分布</div></div>
+        <div class="chart-container" id="chartCostType"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">📊 项目收支对比</div></div>
+        <div class="chart-container" id="chartProjectCompare"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <div class="card-header">
+        <div class="card-title">📋 项目汇总报表</div>
+        <button class="btn btn-info btn-sm" onclick="exportExcel()">📥 导出Excel</button>
+      </div>
+      <div class="table-wrap"><table id="reportTable">
+        <thead><tr><th>项目名称</th><th>客户</th><th>合同金额</th><th>材料成本</th><th>人工成本</th><th>税费</th><th>其他成本</th><th>总成本</th><th>已收款</th><th>待收款</th><th>利润</th><th>状态</th></tr></thead>
+        <tbody>${renderReportRows(data)}</tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+function renderReportRows(data) {
+  return data.projects.map(p=>{
+    const costs = data.costRecords.filter(c=>c.projectId===p.id);
+    const materialCost = costs.filter(c=>c.costType===1).reduce((s,c)=>s+c.amount,0);
+    const laborCost = costs.filter(c=>c.costType===2).reduce((s,c)=>s+c.amount,0);
+    const taxCost = costs.filter(c=>c.costType===3).reduce((s,c)=>s+c.amount,0);
+    const otherCost = costs.filter(c=>c.costType===4).reduce((s,c)=>s+c.amount,0);
+    const totalCost = materialCost + laborCost + taxCost + otherCost;
+    const txns = data.transactions.filter(t=>t.projectId===p.id);
+    const received = txns.filter(t=>t.type===1&&t.isReceived===1).reduce((s,t)=>s+t.amount,0);
+    const receivable = txns.filter(t=>t.type===1&&t.isReceived===0).reduce((s,t)=>s+t.amount,0);
+    const profit = received - totalCost;
+    return `<tr>
+      <td><strong>${p.name}</strong></td><td>${p.clientName}</td>
+      <td>${formatMoney(p.contractAmount)}</td><td>${formatMoney(materialCost)}</td>
+      <td>${formatMoney(laborCost)}</td><td>${formatMoney(taxCost)}</td>
+      <td>${formatMoney(otherCost)}</td><td>${formatMoney(totalCost)}</td>
+      <td>${formatMoney(received)}</td><td>${formatMoney(receivable)}</td>
+      <td><span class="tag ${profit>=0?'tag-success':'tag-danger'}">${formatMoney(profit)}</span></td>
+      <td><span class="tag ${p.status===1?'tag-primary':'tag-gray'}">${PROJECT_STATUS[p.status]}</span></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="12" style="text-align:center;color:var(--text-light);padding:30px;">暂无项目数据</td></tr>';
+}
+
+function initReportCharts(data) {
+  // 成本类型分布
+  const chart1 = document.getElementById('chartCostType');
+  if(chart1) {
+    const c = echarts.init(chart1);
+    const typeMap = {};
+    data.costRecords.forEach(r=>{ typeMap[COST_TYPES[r.costType]] = (typeMap[COST_TYPES[r.costType]]||0) + r.amount; });
+    c.setOption({
+      tooltip:{trigger:'item',formatter:p=>`${p.name}: ${formatMoney(p.value)}`},
+      series:[{type:'pie',radius:'60%',data:Object.entries(typeMap).map(([k,v])=>({name:k,value:v})),
+        label:{formatter:'{b}\n{d}%'},emphasis:{itemStyle:{shadowBlur:10,shadowColor:'rgba(0,0,0,0.3)'}}}]
+    });
+  }
+  // 项目收支对比
+  const chart2 = document.getElementById('chartProjectCompare');
+  if(chart2) {
+    const c = echarts.init(chart2);
+    const projects = data.projects.map(p=>{
+      const costs = data.costRecords.filter(r=>r.projectId===p.id).reduce((s,r)=>s+r.amount,0);
+      const income = data.transactions.filter(t=>t.projectId===p.id&&t.type===1&&t.isReceived===1).reduce((s,t)=>s+t.amount,0);
+      return {name:p.name, costs, income};
+    });
+    c.setOption({
+      tooltip:{trigger:'axis'},
+      legend:{data:['成本','收入'],bottom:0},
+      grid:{left:60,right:20,top:20,bottom:40},
+      xAxis:{type:'category',data:projects.map(p=>p.name),axisLabel:{rotate:15}},
+      yAxis:{type:'value',axisLabel:{formatter:v=>'¥'+(v/10000).toFixed(0)+'万'}},
+      series:[
+        {name:'成本',type:'bar',data:projects.map(p=>p.costs),itemStyle:{color:'#e74c3c'}},
+        {name:'收入',type:'bar',data:projects.map(p=>p.income),itemStyle:{color:'#27ae60'}}
+      ]
+    });
+  }
+}
+
+function exportExcel() {
+  const data = getData();
+  const sheetData = [['项目名称','客户','合同金额','材料成本','人工成本','税费','其他成本','总成本','已收款','待收款','利润','状态']];
+  data.projects.forEach(p=>{
+    const costs = data.costRecords.filter(c=>c.projectId===p.id);
+    const mc = costs.filter(c=>c.costType===1).reduce((s,c)=>s+c.amount,0);
+    const lc = costs.filter(c=>c.costType===2).reduce((s,c)=>s+c.amount,0);
+    const tc = costs.filter(c=>c.costType===3).reduce((s,c)=>s+c.amount,0);
+    const oc = costs.filter(c=>c.costType===4).reduce((s,c)=>s+c.amount,0);
+    const totalC = mc+lc+tc+oc;
+    const txns = data.transactions.filter(t=>t.projectId===p.id);
+    const recv = txns.filter(t=>t.type===1&&t.isReceived===1).reduce((s,t)=>s+t.amount,0);
+    const recb = txns.filter(t=>t.type===1&&t.isReceived===0).reduce((s,t)=>s+t.amount,0);
+    sheetData.push([p.name,p.clientName,p.contractAmount,mc,lc,tc,oc,totalC,recv,recb,recv-totalC,PROJECT_STATUS[p.status]]);
+  });
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(sheetData);
+  XLSX.utils.book_append_sheet(wb, ws, '项目汇总报表');
+  XLSX.writeFile(wb, `匠算-项目报表-${today()}.xlsx`);
+  showToast('报表已导出');
+}
+
+// ==================== 初始化 ====================
+document.getElementById('currentDate').textContent = new Date().toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric',weekday:'long'});
+
+// 关闭模态框的点击事件
+document.getElementById('modalOverlay').addEventListener('click', function(e) {
+  if(e.target === this) closeModal();
+});
+
+// 初始渲染
+loadData();
+renderPage();
+
+// 窗口大小改变时重绘图表
+window.addEventListener('resize', ()=>{
+  if(currentPage==='dashboard') initDashboardCharts(getData());
+  if(currentPage==='reports') initReportCharts(getData());
+});
+</script>
+</body>
+</html>
