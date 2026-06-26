@@ -7,7 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
-:root {
+::root {
   --primary: #2c3e50;
   --primary-light: #34495e;
   --accent: #e67e22;
@@ -41,6 +41,9 @@ body {
 .header .logo .icon { width:36px; height:36px; background:var(--accent); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:20px; }
 .header .user-info { display:flex; align-items:center; gap:16px; font-size:14px; }
 .header .user-info .badge { background:var(--accent); padding:4px 12px; border-radius:20px; font-size:12px; }
+.header .user-info .sync-status { font-size:12px; opacity:0.8; }
+.header .user-info .sync-status.connected { color:#2ecc71; }
+.header .user-info .sync-status.disconnected { color:#e74c3c; }
 /* Layout */
 .app-container { display:flex; height:calc(100vh - 60px); }
 /* Sidebar */
@@ -163,6 +166,19 @@ table tr:hover td { background:#fef9f3; }
 .toast.success { background:var(--success); }
 .toast.error { background:var(--danger); }
 .toast.warning { background:var(--warning); }
+/* Loading overlay */
+.loading-overlay {
+  position:fixed; top:0; left:0; width:100%; height:100%;
+  background:rgba(255,255,255,0.8); z-index:250;
+  display:flex; align-items:center; justify-content:center;
+  font-size:16px; color:var(--text-light);
+}
+.loading-overlay .spinner {
+  width:40px; height:40px; border:3px solid var(--border);
+  border-top-color:var(--accent); border-radius:50%;
+  animation: spin 0.8s linear infinite; margin-right:12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 /* Responsive */
 @media (max-width:768px) {
   .sidebar { width:60px; }
@@ -193,6 +209,7 @@ table tr:hover td { background:#fef9f3; }
     <span>匠算</span>
   </div>
   <div class="user-info">
+    <span class="sync-status disconnected" id="syncStatus">🔴 未连接服务器</span>
     <span>📅 <span id="currentDate"></span></span>
     <span class="badge">免费版</span>
   </div>
@@ -236,55 +253,159 @@ table tr:hover td { background:#fef9f3; }
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<script>
-// ==================== 数据管理 ====================
-const STORAGE_KEY = 'jiangSuan_data';
+<!-- Loading -->
+<div class="loading-overlay" id="loadingOverlay" style="display:none;">
+  <div class="spinner"></div> <span id="loadingText">加载中...</span>
+</div>
 
-function getDefaultData() {
-  return {
-    projects: [],
-    costRecords: [],
-    transactions: [],
-    nextIds: { project: 1, cost: 1, transaction: 1 }
+<script>
+// ==================== API 服务层 ====================
+const API_BASE = '/api';
+
+let serverConnected = false;
+
+async function api(method, path, body = null) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' }
   };
+  if (body) opts.body = JSON.stringify(body);
+
+  try {
+    const res = await fetch(`${API_BASE}${path}`, opts);
+    const json = await res.json();
+    if (json.success) {
+      serverConnected = true;
+      updateSyncStatus();
+      return json.data;
+    } else {
+      throw new Error(json.error || '操作失败');
+    }
+  } catch (err) {
+    serverConnected = false;
+    updateSyncStatus();
+    throw err;
+  }
 }
 
-function loadData() {
+function updateSyncStatus() {
+  const el = document.getElementById('syncStatus');
+  if (serverConnected) {
+    el.className = 'sync-status connected';
+    el.textContent = '🟢 数据已同步至服务器';
+  } else {
+    el.className = 'sync-status disconnected';
+    el.textContent = '🔴 未连接服务器';
+  }
+}
+
+// ==================== 数据管理（改为从服务器获取） ====================
+const STORAGE_KEY = 'jiangSuan_data';
+
+// 缓存层：减少请求次数
+let dataCache = null;
+let cacheTime = 0;
+const CACHE_TTL = 2000; // 2秒缓存
+
+async function getData() {
+  const now = Date.now();
+  if (dataCache && (now - cacheTime) < CACHE_TTL) return dataCache;
+
+  try {
+    const data = await api('GET', '/all-data');
+    dataCache = data;
+    cacheTime = now;
+    return data;
+  } catch (err) {
+    // 后端不可用时，降级到 localStorage
+    console.warn('后端不可用，降级到 localStorage:', err.message);
+    serverConnected = false;
+    updateSyncStatus();
+    return loadFromLocalStorage();
+  }
+}
+
+function invalidateCache() {
+  dataCache = null;
+  cacheTime = 0;
+}
+
+function loadFromLocalStorage() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw) {
     try { return JSON.parse(raw); } catch(e) {}
   }
-  // 首次使用添加示例数据
   const data = getDefaultData();
-  data.projects = [
-    { id:1, name:'阳光花园3-502', clientName:'张先生', contractAmount:180000, address:'阳光花园3栋502室', startDate:'2026-05-10', endDate:'2026-07-20', status:1, createdAt:'2026-05-10' },
-    { id:2, name:'翠竹苑2-1101', clientName:'李女士', contractAmount:250000, address:'翠竹苑2栋1101室', startDate:'2026-06-01', endDate:'2026-08-15', status:1, createdAt:'2026-06-01' },
-  ];
-  data.nextIds.project = 3;
-  data.costRecords = [
-    { id:1, projectId:1, costType:1, category:'水电材料', amount:8500, quantity:1, unitPrice:8500, supplier:'伟星管业', recordDate:'2026-05-15', description:'水管、电线、线管', attachmentUrl:'', createdAt:'2026-05-15' },
-    { id:2, projectId:1, costType:1, category:'瓷砖', amount:12000, quantity:80, unitPrice:150, supplier:'东鹏瓷砖', recordDate:'2026-05-18', description:'客厅地砖60x60', attachmentUrl:'', createdAt:'2026-05-18' },
-    { id:3, projectId:1, costType:2, category:'水电工', amount:6000, quantity:15, unitPrice:400, supplier:'王师傅团队', recordDate:'2026-05-20', description:'水电改造人工', attachmentUrl:'', createdAt:'2026-05-20' },
-    { id:4, projectId:1, costType:2, category:'木工', amount:9500, quantity:20, unitPrice:475, supplier:'李师傅团队', recordDate:'2026-06-05', description:'吊顶、衣柜制作', attachmentUrl:'', createdAt:'2026-06-05' },
-    { id:5, projectId:1, costType:4, category:'运输费', amount:1200, quantity:1, unitPrice:1200, supplier:'顺达物流', recordDate:'2026-05-16', description:'材料运输', attachmentUrl:'', createdAt:'2026-05-16' },
-    { id:6, projectId:2, costType:1, category:'水泥沙子', amount:3500, quantity:1, unitPrice:3500, supplier:'建华建材', recordDate:'2026-06-03', description:'水泥、沙子、砖', attachmentUrl:'', createdAt:'2026-06-03' },
-    { id:7, projectId:2, costType:3, category:'增值税', amount:5400, quantity:1, unitPrice:5400, supplier:'税务局', recordDate:'2026-06-10', description:'材料采购增值税', attachmentUrl:'', createdAt:'2026-06-10' },
-  ];
-  data.nextIds.cost = 8;
-  data.transactions = [
-    { id:1, projectId:1, type:1, amount:72000, category:'首期款', transactionDate:'2026-05-10', payer:'张先生', isReceived:1, dueDate:'2026-05-10', status:1, description:'合同签订首期款40%', createdAt:'2026-05-10' },
-    { id:2, projectId:1, type:1, amount:54000, category:'中期款', transactionDate:'', payer:'张先生', isReceived:0, dueDate:'2026-06-20', status:2, description:'中期款30%', createdAt:'2026-05-10' },
-    { id:3, projectId:1, type:1, amount:54000, category:'尾款', transactionDate:'', payer:'张先生', isReceived:0, dueDate:'2026-07-25', status:0, description:'尾款30%', createdAt:'2026-05-10' },
-    { id:4, projectId:2, type:1, amount:100000, category:'首期款', transactionDate:'2026-06-01', payer:'李女士', isReceived:1, dueDate:'2026-06-01', status:1, description:'首期款40%', createdAt:'2026-06-01' },
-    { id:5, projectId:2, type:1, amount:75000, category:'中期款', transactionDate:'', payer:'李女士', isReceived:0, dueDate:'2026-07-15', status:0, description:'中期款30%', createdAt:'2026-06-01' },
-  ];
-  data.nextIds.transaction = 6;
-  saveData(data);
+  saveToLocalStorage(data);
   return data;
 }
 
-function saveData(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-function getData() { return loadData(); }
+function saveToLocalStorage(data) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function getDefaultData() {
+  const now = new Date().toISOString().split('T')[0];
+  return {
+    projects: [{
+      id: 1, name: '示例装修项目', clientName: '李先生',
+      contractAmount: 120000, address: '北京市海淀区花园路8号',
+      startDate: now, endDate: '', status: 1,
+      createdAt: now, updatedAt: now
+    }],
+    costRecords: [{
+      id: 1, projectId: 1, costType: 1, category: '水电材料',
+      amount: 8000, quantity: 100, unitPrice: 80,
+      supplier: '水电供应商', recordDate: now,
+      description: '示例数据-水电材料', attachmentUrl: '',
+      createdAt: now, updatedAt: now
+    }, {
+      id: 2, projectId: 1, costType: 2, category: '木工人工',
+      amount: 15000, quantity: 15, unitPrice: 1000,
+      supplier: '木工班组', recordDate: now,
+      description: '示例数据-木工', attachmentUrl: '',
+      createdAt: now, updatedAt: now
+    }],
+    transactions: [{
+      id: 1, projectId: 1, type: 1, amount: 60000,
+      category: '首期款', transactionDate: now,
+      payer: '李先生', isReceived: 1, dueDate: now,
+      status: 1, description: '示例数据-首期款',
+      createdAt: now, updatedAt: now
+    }],
+    nextIds: { project: 2, cost: 3, transaction: 2 }
+  };
+}
+
+// ==================== 数据迁移：首次使用自动将 localStorage 数据导入后端 ====================
+async function migrateIfNeeded() {
+  const localData = loadFromLocalStorage();
+  if (!localData.projects || localData.projects.length === 0) {
+    // 本地没有数据，无需迁移
+    return;
+  }
+
+  // 检查后端是否已有数据
+  try {
+    const serverData = await api('GET', '/all-data');
+    if (serverData.projects.length > 0) {
+      // 后端已有数据，不再迁移
+      return;
+    }
+
+    // 后端无数据但本地有数据，执行迁移
+    showLoading('正在将本地数据迁移到服务器...');
+    const result = await api('POST', '/migrate', localData);
+    hideLoading();
+    showToast(`数据迁移成功！项目${result.projects}个、成本${result.costs}条、收支${result.transactions}条已迁移至服务器`);
+    invalidateCache();
+    // 迁移完成后清除本地缓存，避免下次再迁移
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (err) {
+    hideLoading();
+    console.warn('迁移失败，将继续使用本地数据:', err.message);
+  }
+}
 
 // ==================== 工具函数 ====================
 function formatMoney(n) { return '¥' + Number(n).toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -301,6 +422,14 @@ function showToast(msg, type='success') {
   const t = document.getElementById('toast');
   t.textContent = msg; t.className = 'toast ' + type + ' show';
   setTimeout(()=>{ t.classList.remove('show'); }, 2500);
+}
+
+function showLoading(text='加载中...') {
+  document.getElementById('loadingText').textContent = text;
+  document.getElementById('loadingOverlay').style.display = 'flex';
+}
+function hideLoading() {
+  document.getElementById('loadingOverlay').style.display = 'none';
 }
 
 function openModal(title, bodyHtml, footerHtml='') {
@@ -324,15 +453,25 @@ document.querySelectorAll('.nav-item').forEach(item => {
   });
 });
 
-function renderPage() {
-  const data = getData();
-  const container = document.getElementById('mainContent');
-  switch(currentPage) {
-    case 'dashboard': container.innerHTML = renderDashboard(data); initDashboardCharts(data); break;
-    case 'projects': container.innerHTML = renderProjects(data); break;
-    case 'costs': container.innerHTML = renderCosts(data); break;
-    case 'transactions': container.innerHTML = renderTransactions(data); break;
-    case 'reports': container.innerHTML = renderReports(data); initReportCharts(data); break;
+async function renderPage() {
+  try {
+    const data = await getData();
+    const container = document.getElementById('mainContent');
+    switch(currentPage) {
+      case 'dashboard': container.innerHTML = renderDashboard(data); initDashboardCharts(data); break;
+      case 'projects': container.innerHTML = renderProjects(data); break;
+      case 'costs': container.innerHTML = renderCosts(data); break;
+      case 'transactions': container.innerHTML = renderTransactions(data); break;
+      case 'reports': container.innerHTML = renderReports(data); initReportCharts(data); break;
+    }
+  } catch (err) {
+    document.getElementById('mainContent').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">⚠️</div>
+        <p>数据加载失败: ${err.message}</p>
+        <button class="btn btn-primary" onclick="renderPage()">重新加载</button>
+      </div>
+    `;
   }
 }
 
@@ -401,7 +540,6 @@ function initDashboardCharts(data) {
 
 // ==================== 项目管理 ====================
 function renderProjects(data) {
-  const filterStatus = '<select id="filterProjectStatus" onchange="renderPage()"><option value="all">全部状态</option><option value="1">进行中</option><option value="2">已完工</option><option value="3">已结算</option></select>';
   let rows = '';
   const filtered = data.projects.filter(p=>{
     const sel = document.getElementById('filterProjectStatus');
@@ -434,8 +572,11 @@ function renderProjects(data) {
     <div class="card">
       <div class="card-header">
         <div class="card-title">项目列表</div>
-        <div style="display:flex;gap:8px;">
-          <div class="filter-bar" style="margin:0;">${filterStatus}</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="filterProjectStatus" onchange="renderPage()" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;">
+            <option value="all">全部状态</option>
+            ${Object.entries(PROJECT_STATUS).map(([k,v])=>'<option value="'+k+'">'+v+'</option>').join('')}
+          </select>
           <button class="btn btn-primary" onclick="showProjectForm()">+ 新建项目</button>
         </div>
       </div>
@@ -472,83 +613,92 @@ function showProjectForm(project=null) {
   openModal(title, body, footer);
 }
 
-function saveProject(editId) {
-  const data = getData();
+async function saveProject(editId) {
   const name = document.getElementById('projName').value.trim();
   const clientName = document.getElementById('projClient').value.trim();
   const contractAmount = parseFloat(document.getElementById('projAmount').value) || 0;
   if(!name || !clientName || !contractAmount) { showToast('请填写必填字段','warning'); return; }
 
-  const project = {
-    id: editId || data.nextIds.project++,
+  const payload = {
     name, clientName, contractAmount,
     address: document.getElementById('projAddr').value,
     startDate: document.getElementById('projStart').value,
     endDate: document.getElementById('projEnd').value,
-    status: parseInt(document.getElementById('projStatus').value),
-    createdAt: editId ? (data.projects.find(p=>p.id===editId)?.createdAt || today()) : today()
+    status: parseInt(document.getElementById('projStatus').value)
   };
 
-  if(editId) {
-    const idx = data.projects.findIndex(p=>p.id===editId);
-    if(idx>=0) data.projects[idx] = project;
-  } else {
-    data.projects.push(project);
+  try {
+    if (editId) {
+      await api('PUT', `/projects/${editId}`, payload);
+      showToast('项目已更新');
+    } else {
+      await api('POST', '/projects', payload);
+      showToast('项目已创建');
+    }
+    invalidateCache();
+    closeModal();
+    renderPage();
+  } catch (err) {
+    showToast('保存失败: ' + err.message, 'error');
   }
-  saveData(data);
-  closeModal();
-  showToast(editId?'项目已更新':'项目已创建');
-  renderPage();
 }
 
-function editProject(id) {
-  const data = getData();
-  const p = data.projects.find(p=>p.id===id);
-  if(p) showProjectForm(p);
+async function editProject(id) {
+  try {
+    const p = await api('GET', `/projects/${id}`);
+    if(p) showProjectForm(p);
+  } catch (err) {
+    showToast('加载项目失败', 'error');
+  }
 }
 
-function deleteProject(id) {
+async function deleteProject(id) {
   if(!confirm('确定要删除此项目吗？关联的成本和收支记录也将一并删除。')) return;
-  const data = getData();
-  data.projects = data.projects.filter(p=>p.id!==id);
-  data.costRecords = data.costRecords.filter(c=>c.projectId!==id);
-  data.transactions = data.transactions.filter(t=>t.projectId!==id);
-  saveData(data);
-  showToast('项目已删除','warning');
-  renderPage();
+  try {
+    await api('DELETE', `/projects/${id}`);
+    invalidateCache();
+    showToast('项目已删除','warning');
+    renderPage();
+  } catch (err) {
+    showToast('删除失败: ' + err.message, 'error');
+  }
 }
 
-function viewProjectDetail(id) {
-  const data = getData();
-  const p = data.projects.find(p=>p.id===id);
-  if(!p) return;
-  const costs = data.costRecords.filter(c=>c.projectId===id);
-  const totalCost = costs.reduce((s,c)=>s+c.amount,0);
-  const txns = data.transactions.filter(t=>t.projectId===id);
-  const totalIncome = txns.filter(t=>t.type===1&&t.isReceived===1).reduce((s,t)=>s+t.amount,0);
-  const totalReceivable = txns.filter(t=>t.type===1&&t.isReceived===0).reduce((s,t)=>s+t.amount,0);
-  const profit = totalIncome - totalCost;
+async function viewProjectDetail(id) {
+  try {
+    const data = await getData();
+    const p = data.projects.find(p=>p.id===id);
+    if(!p) return;
+    const costs = data.costRecords.filter(c=>c.projectId===id);
+    const totalCost = costs.reduce((s,c)=>s+c.amount,0);
+    const txns = data.transactions.filter(t=>t.projectId===id);
+    const totalIncome = txns.filter(t=>t.type===1&&t.isReceived===1).reduce((s,t)=>s+t.amount,0);
+    const totalReceivable = txns.filter(t=>t.type===1&&t.isReceived===0).reduce((s,t)=>s+t.amount,0);
+    const profit = totalIncome - totalCost;
 
-  const costRows = costs.map(c=>`<tr><td>${COST_ICONS[c.costType]} ${COST_TYPES[c.costType]}</td><td>${c.category}</td><td>${c.quantity}</td><td>${formatMoney(c.unitPrice)}</td><td>${formatMoney(c.amount)}</td><td>${c.supplier||'-'}</td><td>${formatDate(c.recordDate)}</td></tr>`).join('') || '<tr><td colspan="7" style="text-align:center;">暂无成本记录</td></tr>';
+    const costRows = costs.map(c=>`<tr><td>${COST_ICONS[c.costType]} ${COST_TYPES[c.costType]}</td><td>${c.category}</td><td>${c.quantity}</td><td>${formatMoney(c.unitPrice)}</td><td>${formatMoney(c.amount)}</td><td>${c.supplier||'-'}</td><td>${formatDate(c.recordDate)}</td></tr>`).join('') || '<tr><td colspan="7" style="text-align:center;">暂无成本记录</td></tr>';
 
-  const txnRows = txns.map(t=>`<tr><td>${t.type===1?'💰收入':'💸支出'}</td><td>${t.category}</td><td>${formatMoney(t.amount)}</td><td>${t.payer||'-'}</td><td>${formatDate(t.dueDate)}</td><td><span class="tag ${TRANS_STATUS_CLASS[t.status]}">${TRANS_STATUS[t.status]}</span></td></tr>`).join('') || '<tr><td colspan="6" style="text-align:center;">暂无收支记录</td></tr>';
+    const txnRows = txns.map(t=>`<tr><td>${t.type===1?'💰收入':'💸支出'}</td><td>${t.category}</td><td>${formatMoney(t.amount)}</td><td>${t.payer||'-'}</td><td>${formatDate(t.dueDate)}</td><td><span class="tag ${TRANS_STATUS_CLASS[t.status]}">${TRANS_STATUS[t.status]}</span></td></tr>`).join('') || '<tr><td colspan="6" style="text-align:center;">暂无收支记录</td></tr>';
 
-  const body = `
-    <div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px;">
-      <div class="stat-card"><div class="stat-label">合同金额</div><div class="stat-value" style="font-size:20px;">${formatMoney(p.contractAmount)}</div></div>
-      <div class="stat-card danger"><div class="stat-label">总成本</div><div class="stat-value" style="font-size:20px;">${formatMoney(totalCost)}</div></div>
-      <div class="stat-card success"><div class="stat-label">已收款</div><div class="stat-value" style="font-size:20px;">${formatMoney(totalIncome)}</div></div>
-      <div class="stat-card accent"><div class="stat-label">预计利润</div><div class="stat-value" style="font-size:20px;">${formatMoney(profit)}</div></div>
-    </div>
-    <p style="font-size:13px;color:var(--text-light);margin-bottom:12px;">
-      客户：${p.clientName} | 地址：${p.address||'-'} | 状态：${PROJECT_STATUS[p.status]} | 开工：${formatDate(p.startDate)} | 预计完工：${formatDate(p.endDate)}
-    </p>
-    <h4 style="margin:16px 0 8px;">📋 成本明细</h4>
-    <div class="table-wrap"><table><thead><tr><th>成本类型</th><th>分类</th><th>数量</th><th>单价</th><th>金额</th><th>供应商</th><th>日期</th></tr></thead><tbody>${costRows}</tbody></table></div>
-    <h4 style="margin:16px 0 8px;">💳 收支明细</h4>
-    <div class="table-wrap"><table><thead><tr><th>类型</th><th>类别</th><th>金额</th><th>付款方</th><th>应收日期</th><th>状态</th></tr></thead><tbody>${txnRows}</tbody></table></div>
-  `;
-  openModal(`📁 ${p.name} - 项目详情`, body);
+    const body = `
+      <div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px;">
+        <div class="stat-card"><div class="stat-label">合同金额</div><div class="stat-value" style="font-size:20px;">${formatMoney(p.contractAmount)}</div></div>
+        <div class="stat-card danger"><div class="stat-label">总成本</div><div class="stat-value" style="font-size:20px;">${formatMoney(totalCost)}</div></div>
+        <div class="stat-card success"><div class="stat-label">已收款</div><div class="stat-value" style="font-size:20px;">${formatMoney(totalIncome)}</div></div>
+        <div class="stat-card accent"><div class="stat-label">预计利润</div><div class="stat-value" style="font-size:20px;">${formatMoney(profit)}</div></div>
+      </div>
+      <p style="font-size:13px;color:var(--text-light);margin-bottom:12px;">
+        客户：${p.clientName} | 地址：${p.address||'-'} | 状态：${PROJECT_STATUS[p.status]} | 开工：${formatDate(p.startDate)} | 预计完工：${formatDate(p.endDate)}
+      </p>
+      <h4 style="margin:16px 0 8px;">📋 成本明细</h4>
+      <div class="table-wrap"><table><thead><tr><th>成本类型</th><th>分类</th><th>数量</th><th>单价</th><th>金额</th><th>供应商</th><th>日期</th></tr></thead><tbody>${costRows}</tbody></table></div>
+      <h4 style="margin:16px 0 8px;">💳 收支明细</h4>
+      <div class="table-wrap"><table><thead><tr><th>类型</th><th>类别</th><th>金额</th><th>付款方</th><th>应收日期</th><th>状态</th></tr></thead><tbody>${txnRows}</tbody></table></div>
+    `;
+    openModal(`📁 ${p.name} - 项目详情`, body);
+  } catch (err) {
+    showToast('加载项目详情失败', 'error');
+  }
 }
 
 // ==================== 成本记录 ====================
@@ -590,8 +740,13 @@ function renderCosts(data) {
     <div class="card">
       <div class="card-header">
         <div class="card-title">成本明细列表</div>
-        <div style="display:flex;gap:8px;">
-          <div class="filter-bar" style="margin:0;">${filterBar}</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="filterCostProject" onchange="renderPage()" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;">
+            <option value="all">全部项目</option>${data.projects.map(p=>'<option value="'+p.id+'">'+p.name+'</option>').join('')}
+          </select>
+          <select id="filterCostType" onchange="renderPage()" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;">
+            ${Object.entries(COST_TYPES).map(([k,v])=>'<option value="'+k+'">'+v+'</option>').join('')}
+          </select>
           <button class="btn btn-primary" onclick="showCostForm()">+ 新增成本</button>
         </div>
       </div>
@@ -603,44 +758,65 @@ function renderCosts(data) {
   `;
 }
 
-function showCostForm(cost=null) {
-  const data = getData();
-  const isEdit = !!cost;
-  const title = isEdit ? '编辑成本记录' : '新增成本记录';
-  const projectOptions = data.projects.map(p=>`<option value="${p.id}" ${cost&&cost.projectId===p.id?'selected':''}>${p.name}</option>`).join('');
-  const body = `
-    <div class="form-group"><label>关联项目 *</label><select id="costProject">${projectOptions}</select></div>
-    <div class="form-row">
-      <div class="form-group"><label>成本类型 *</label>
-        <select id="costType">${Object.entries(COST_TYPES).map(([k,v])=>`<option value="${k}" ${cost&&cost.costType==k?'selected':''}>${v}</option>`).join('')}</select>
-      </div>
-      <div class="form-group"><label>具体分类</label><input id="costCategory" value="${cost?cost.category:''}" placeholder="如：水电材料、木工"></div>
-    </div>
-    <div class="form-row-3">
-      <div class="form-group"><label>数量</label><input id="costQty" type="number" step="0.01" value="${cost?cost.quantity:''}"></div>
-      <div class="form-group"><label>单价</label><input id="costUnitPrice" type="number" step="0.01" value="${cost?cost.unitPrice:''}"></div>
-      <div class="form-group"><label>金额 *</label><input id="costAmount" type="number" step="0.01" value="${cost?cost.amount:''}"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>供应商/施工方</label><input id="costSupplier" value="${cost?cost.supplier:''}"></div>
-      <div class="form-group"><label>记录日期</label><input id="costDate" type="date" value="${cost?cost.recordDate:today()}"></div>
-    </div>
-    <div class="form-group"><label>备注</label><textarea id="costDesc" rows="2">${cost?cost.description||'':''}</textarea></div>
-  `;
-  const footer = `<button class="btn btn-outline" onclick="closeModal()">取消</button>
-    <button class="btn btn-primary" onclick="saveCost(${isEdit?cost.id:'null'})">保存</button>`;
-  openModal(title, body, footer);
+// ==================== 成本表单 数量×单价=金额 联动逻辑 ====================
+let costAutoCalc = true; // true=自动计算模式, false=用户手动输入金额模式
+
+function onCostQtyPriceChange() {
+  if (!costAutoCalc) return; // 用户已手动改过金额，不再自动计算
+  const qty = parseFloat(document.getElementById('costQty').value);
+  const price = parseFloat(document.getElementById('costUnitPrice').value);
+  if (!isNaN(qty) && !isNaN(price) && qty > 0 && price > 0) {
+    const amount = Math.round(qty * price * 100) / 100;
+    document.getElementById('costAmount').value = amount;
+  }
 }
 
-function saveCost(editId) {
-  const data = getData();
+function onCostAmountManual() {
+  // 用户手动修改了金额，断开自动联动
+  costAutoCalc = false;
+}
+
+async function showCostForm(cost=null) {
+  costAutoCalc = true; // 每次打开表单重置为自动计算模式
+  try {
+    const data = await getData();
+    const isEdit = !!cost;
+    const title = isEdit ? '编辑成本记录' : '新增成本记录';
+    const projectOptions = data.projects.map(p=>`<option value="${p.id}" ${cost&&cost.projectId===p.id?'selected':''}>${p.name}</option>`).join('');
+    const body = `
+      <div class="form-group"><label>关联项目 *</label><select id="costProject">${projectOptions}</select></div>
+      <div class="form-row">
+        <div class="form-group"><label>成本类型 *</label>
+          <select id="costType">${Object.entries(COST_TYPES).map(([k,v])=>`<option value="${k}" ${cost&&cost.costType==k?'selected':''}>${v}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label>具体分类</label><input id="costCategory" value="${cost?cost.category:''}" placeholder="如：水电材料、木工"></div>
+      </div>
+      <div class="form-row-3">
+        <div class="form-group"><label>数量</label><input id="costQty" type="number" step="0.01" value="${cost?cost.quantity:''}" oninput="onCostQtyPriceChange()" placeholder="输入数量"></div>
+        <div class="form-group"><label>单价</label><input id="costUnitPrice" type="number" step="0.01" value="${cost?cost.unitPrice:''}" oninput="onCostQtyPriceChange()" placeholder="输入单价"></div>
+        <div class="form-group"><label>金额 *</label><input id="costAmount" type="number" step="0.01" value="${cost?cost.amount:''}" oninput="onCostAmountManual()" placeholder="数量×单价自动计算，也可手动填"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>供应商/施工方</label><input id="costSupplier" value="${cost?cost.supplier:''}"></div>
+        <div class="form-group"><label>记录日期</label><input id="costDate" type="date" value="${cost?cost.recordDate:today()}"></div>
+      </div>
+      <div class="form-group"><label>备注</label><textarea id="costDesc" rows="2">${cost?cost.description||'':''}</textarea></div>
+    `;
+    const footer = `<button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveCost(${isEdit?cost.id:'null'})">保存</button>`;
+    openModal(title, body, footer);
+  } catch (err) {
+    showToast('加载数据失败', 'error');
+  }
+}
+
+async function saveCost(editId) {
   const projectId = parseInt(document.getElementById('costProject').value);
   const costType = parseInt(document.getElementById('costType').value);
   const amount = parseFloat(document.getElementById('costAmount').value) || 0;
   if(!projectId || !amount) { showToast('请填写必填字段','warning'); return; }
 
-  const cost = {
-    id: editId || data.nextIds.cost++,
+  const payload = {
     projectId, costType,
     category: document.getElementById('costCategory').value,
     amount,
@@ -648,36 +824,45 @@ function saveCost(editId) {
     unitPrice: parseFloat(document.getElementById('costUnitPrice').value) || 0,
     supplier: document.getElementById('costSupplier').value,
     recordDate: document.getElementById('costDate').value || today(),
-    description: document.getElementById('costDesc').value,
-    attachmentUrl: '',
-    createdAt: editId ? (data.costRecords.find(c=>c.id===editId)?.createdAt || today()) : today()
+    description: document.getElementById('costDesc').value
   };
 
-  if(editId) {
-    const idx = data.costRecords.findIndex(c=>c.id===editId);
-    if(idx>=0) data.costRecords[idx] = cost;
-  } else {
-    data.costRecords.push(cost);
+  try {
+    if (editId) {
+      await api('PUT', `/costs/${editId}`, payload);
+      showToast('成本记录已更新');
+    } else {
+      await api('POST', '/costs', payload);
+      showToast('成本记录已添加');
+    }
+    invalidateCache();
+    closeModal();
+    renderPage();
+  } catch (err) {
+    showToast('保存失败: ' + err.message, 'error');
   }
-  saveData(data);
-  closeModal();
-  showToast(editId?'成本记录已更新':'成本记录已添加');
-  renderPage();
 }
 
-function editCost(id) {
-  const data = getData();
-  const c = data.costRecords.find(c=>c.id===id);
-  if(c) showCostForm(c);
+async function editCost(id) {
+  try {
+    const data = await getData();
+    const c = data.costRecords.find(c=>c.id===id);
+    if(c) showCostForm(c);
+  } catch (err) {
+    showToast('加载成本记录失败', 'error');
+  }
 }
 
-function deleteCost(id) {
+async function deleteCost(id) {
   if(!confirm('确定要删除此成本记录吗？')) return;
-  const data = getData();
-  data.costRecords = data.costRecords.filter(c=>c.id!==id);
-  saveData(data);
-  showToast('成本记录已删除','warning');
-  renderPage();
+  try {
+    await api('DELETE', `/costs/${id}`);
+    invalidateCache();
+    showToast('成本记录已删除','warning');
+    renderPage();
+  } catch (err) {
+    showToast('删除失败: ' + err.message, 'error');
+  }
 }
 
 // ==================== 收支账款 ====================
@@ -724,8 +909,16 @@ function renderTransactions(data) {
     <div class="card">
       <div class="card-header">
         <div class="card-title">收支记录列表</div>
-        <div style="display:flex;gap:8px;">
-          <div class="filter-bar" style="margin:0;">${filterBar}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select id="filterTxnProject" onchange="renderPage()" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;">
+            <option value="all">全部项目</option>${data.projects.map(p=>'<option value="'+p.id+'">'+p.name+'</option>').join('')}
+          </select>
+          <select id="filterTxnStatus" onchange="renderPage()" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;">
+            <option value="all">全部状态</option><option value="0">待收</option><option value="1">已收</option><option value="2">逾期</option>
+          </select>
+          <select id="filterTxnType" onchange="renderPage()" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;">
+            <option value="all">全部类型</option><option value="1">收入</option><option value="2">支出</option>
+          </select>
           <button class="btn btn-primary" onclick="showTransactionForm()">+ 新增收支</button>
         </div>
       </div>
@@ -737,38 +930,41 @@ function renderTransactions(data) {
   `;
 }
 
-function showTransactionForm(txn=null) {
-  const data = getData();
-  const isEdit = !!txn;
-  const title = isEdit ? '编辑收支记录' : '新增收支记录';
-  const projectOptions = data.projects.map(p=>`<option value="${p.id}" ${txn&&txn.projectId===p.id?'selected':''}>${p.name}</option>`).join('');
-  const body = `
-    <div class="form-group"><label>关联项目 *</label><select id="txnProject">${projectOptions}</select></div>
-    <div class="form-row">
-      <div class="form-group"><label>类型 *</label>
-        <select id="txnType">${[{v:1,l:'收入'},{v:2,l:'支出'}].map(o=>`<option value="${o.v}" ${txn&&txn.type===o.v?'selected':''}>${o.l}</option>`).join('')}</select>
+async function showTransactionForm(txn=null) {
+  try {
+    const data = await getData();
+    const isEdit = !!txn;
+    const title = isEdit ? '编辑收支记录' : '新增收支记录';
+    const projectOptions = data.projects.map(p=>`<option value="${p.id}" ${txn&&txn.projectId===p.id?'selected':''}>${p.name}</option>`).join('');
+    const body = `
+      <div class="form-group"><label>关联项目 *</label><select id="txnProject">${projectOptions}</select></div>
+      <div class="form-row">
+        <div class="form-group"><label>类型 *</label>
+          <select id="txnType">${[{v:1,l:'收入'},{v:2,l:'支出'}].map(o=>`<option value="${o.v}" ${txn&&txn.type===o.v?'selected':''}>${o.l}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label>类别</label><input id="txnCategory" value="${txn?txn.category:''}" placeholder="如：首期款、尾款"></div>
       </div>
-      <div class="form-group"><label>类别</label><input id="txnCategory" value="${txn?txn.category:''}" placeholder="如：首期款、尾款"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>金额 *</label><input id="txnAmount" type="number" step="0.01" value="${txn?txn.amount:''}"></div>
-      <div class="form-group"><label>付款方</label><input id="txnPayer" value="${txn?txn.payer:''}"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>应收/应付日期</label><input id="txnDueDate" type="date" value="${txn?txn.dueDate:''}"></div>
-      <div class="form-group"><label>是否已收</label>
-        <select id="txnReceived">${[{v:0,l:'未收'},{v:1,l:'已收'}].map(o=>`<option value="${o.v}" ${txn&&txn.isReceived===o.v?'selected':''}>${o.l}</option>`).join('')}</select>
+      <div class="form-row">
+        <div class="form-group"><label>金额 *</label><input id="txnAmount" type="number" step="0.01" value="${txn?txn.amount:''}"></div>
+        <div class="form-group"><label>付款方</label><input id="txnPayer" value="${txn?txn.payer:''}"></div>
       </div>
-    </div>
-    <div class="form-group"><label>备注</label><textarea id="txnDesc" rows="2">${txn?txn.description||'':''}</textarea></div>
-  `;
-  const footer = `<button class="btn btn-outline" onclick="closeModal()">取消</button>
-    <button class="btn btn-primary" onclick="saveTransaction(${isEdit?txn.id:'null'})">保存</button>`;
-  openModal(title, body, footer);
+      <div class="form-row">
+        <div class="form-group"><label>应收/应付日期</label><input id="txnDueDate" type="date" value="${txn?txn.dueDate:''}"></div>
+        <div class="form-group"><label>是否已收</label>
+          <select id="txnReceived">${[{v:0,l:'未收'},{v:1,l:'已收'}].map(o=>`<option value="${o.v}" ${txn&&txn.isReceived===o.v?'selected':''}>${o.l}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="form-group"><label>备注</label><textarea id="txnDesc" rows="2">${txn?txn.description||'':''}</textarea></div>
+    `;
+    const footer = `<button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveTransaction(${isEdit?txn.id:'null'})">保存</button>`;
+    openModal(title, body, footer);
+  } catch (err) {
+    showToast('加载数据失败', 'error');
+  }
 }
 
-function saveTransaction(editId) {
-  const data = getData();
+async function saveTransaction(editId) {
   const projectId = parseInt(document.getElementById('txnProject').value);
   const type = parseInt(document.getElementById('txnType').value);
   const amount = parseFloat(document.getElementById('txnAmount').value) || 0;
@@ -779,55 +975,62 @@ function saveTransaction(editId) {
   let status = isReceived===1 ? 1 : 0;
   if(isReceived===0 && dueDate && dueDate < today()) status = 2;
 
-  const txn = {
-    id: editId || data.nextIds.transaction++,
+  const payload = {
     projectId, type, amount,
     category: document.getElementById('txnCategory').value,
-    transactionDate: isReceived===1 ? (document.getElementById('txnDueDate').value || today()) : '',
     payer: document.getElementById('txnPayer').value,
-    isReceived, dueDate,
-    status,
-    description: document.getElementById('txnDesc').value,
-    createdAt: editId ? (data.transactions.find(t=>t.id===editId)?.createdAt || today()) : today()
+    isReceived, dueDate, status,
+    transactionDate: isReceived===1 ? (dueDate || today()) : '',
+    description: document.getElementById('txnDesc').value
   };
 
-  if(editId) {
-    const idx = data.transactions.findIndex(t=>t.id===editId);
-    if(idx>=0) data.transactions[idx] = txn;
-  } else {
-    data.transactions.push(txn);
+  try {
+    if (editId) {
+      await api('PUT', `/transactions/${editId}`, payload);
+      showToast('收支记录已更新');
+    } else {
+      await api('POST', '/transactions', payload);
+      showToast('收支记录已添加');
+    }
+    invalidateCache();
+    closeModal();
+    renderPage();
+  } catch (err) {
+    showToast('保存失败: ' + err.message, 'error');
   }
-  saveData(data);
-  closeModal();
-  showToast(editId?'收支记录已更新':'收支记录已添加');
-  renderPage();
 }
 
-function editTransaction(id) {
-  const data = getData();
-  const t = data.transactions.find(t=>t.id===id);
-  if(t) showTransactionForm(t);
+async function editTransaction(id) {
+  try {
+    const data = await getData();
+    const t = data.transactions.find(t=>t.id===id);
+    if(t) showTransactionForm(t);
+  } catch (err) {
+    showToast('加载收支记录失败', 'error');
+  }
 }
 
-function deleteTransaction(id) {
+async function deleteTransaction(id) {
   if(!confirm('确定要删除此收支记录吗？')) return;
-  const data = getData();
-  data.transactions = data.transactions.filter(t=>t.id!==id);
-  saveData(data);
-  showToast('收支记录已删除','warning');
-  renderPage();
+  try {
+    await api('DELETE', `/transactions/${id}`);
+    invalidateCache();
+    showToast('收支记录已删除','warning');
+    renderPage();
+  } catch (err) {
+    showToast('删除失败: ' + err.message, 'error');
+  }
 }
 
-function markReceived(id) {
-  const data = getData();
-  const t = data.transactions.find(t=>t.id===id);
-  if(!t) return;
-  t.isReceived = 1;
-  t.status = 1;
-  t.transactionDate = today();
-  saveData(data);
-  showToast('已标记为已收');
-  renderPage();
+async function markReceived(id) {
+  try {
+    await api('PUT', `/transactions/${id}/mark-received`);
+    invalidateCache();
+    showToast('已标记为已收');
+    renderPage();
+  } catch (err) {
+    showToast('操作失败: ' + err.message, 'error');
+  }
 }
 
 // ==================== 报表统计 ====================
@@ -890,7 +1093,6 @@ function renderReportRows(data) {
 }
 
 function initReportCharts(data) {
-  // 成本类型分布
   const chart1 = document.getElementById('chartCostType');
   if(chart1) {
     const c = echarts.init(chart1);
@@ -902,7 +1104,6 @@ function initReportCharts(data) {
         label:{formatter:'{b}\n{d}%'},emphasis:{itemStyle:{shadowBlur:10,shadowColor:'rgba(0,0,0,0.3)'}}}]
     });
   }
-  // 项目收支对比
   const chart2 = document.getElementById('chartProjectCompare');
   if(chart2) {
     const c = echarts.init(chart2);
@@ -925,39 +1126,60 @@ function initReportCharts(data) {
   }
 }
 
-function exportExcel() {
-  const data = getData();
-  const sheetData = [['项目名称','客户','合同金额','材料成本','人工成本','税费','其他成本','总成本','已收款','待收款','利润','状态']];
-  data.projects.forEach(p=>{
-    const costs = data.costRecords.filter(c=>c.projectId===p.id);
-    const mc = costs.filter(c=>c.costType===1).reduce((s,c)=>s+c.amount,0);
-    const lc = costs.filter(c=>c.costType===2).reduce((s,c)=>s+c.amount,0);
-    const tc = costs.filter(c=>c.costType===3).reduce((s,c)=>s+c.amount,0);
-    const oc = costs.filter(c=>c.costType===4).reduce((s,c)=>s+c.amount,0);
-    const totalC = mc+lc+tc+oc;
-    const txns = data.transactions.filter(t=>t.projectId===p.id);
-    const recv = txns.filter(t=>t.type===1&&t.isReceived===1).reduce((s,t)=>s+t.amount,0);
-    const recb = txns.filter(t=>t.type===1&&t.isReceived===0).reduce((s,t)=>s+t.amount,0);
-    sheetData.push([p.name,p.clientName,p.contractAmount,mc,lc,tc,oc,totalC,recv,recb,recv-totalC,PROJECT_STATUS[p.status]]);
-  });
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(sheetData);
-  XLSX.utils.book_append_sheet(wb, ws, '项目汇总报表');
-  XLSX.writeFile(wb, `匠算-项目报表-${today()}.xlsx`);
-  showToast('报表已导出');
+async function exportExcel() {
+  try {
+    const data = await getData();
+    const sheetData = [['项目名称','客户','合同金额','材料成本','人工成本','税费','其他成本','总成本','已收款','待收款','利润','状态']];
+    data.projects.forEach(p=>{
+      const costs = data.costRecords.filter(c=>c.projectId===p.id);
+      const mc = costs.filter(c=>c.costType===1).reduce((s,c)=>s+c.amount,0);
+      const lc = costs.filter(c=>c.costType===2).reduce((s,c)=>s+c.amount,0);
+      const tc = costs.filter(c=>c.costType===3).reduce((s,c)=>s+c.amount,0);
+      const oc = costs.filter(c=>c.costType===4).reduce((s,c)=>s+c.amount,0);
+      const totalC = mc+lc+tc+oc;
+      const txns = data.transactions.filter(t=>t.projectId===p.id);
+      const recv = txns.filter(t=>t.type===1&&t.isReceived===1).reduce((s,t)=>s+t.amount,0);
+      const recb = txns.filter(t=>t.type===1&&t.isReceived===0).reduce((s,t)=>s+t.amount,0);
+      sheetData.push([p.name,p.clientName,p.contractAmount,mc,lc,tc,oc,totalC,recv,recb,recv-totalC,PROJECT_STATUS[p.status]]);
+    });
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+    XLSX.utils.book_append_sheet(wb, ws, '项目汇总报表');
+    XLSX.writeFile(wb, `匠算-项目报表-${today()}.xlsx`);
+    showToast('报表已导出');
+  } catch (err) {
+    showToast('导出失败: ' + err.message, 'error');
+  }
 }
 
 // ==================== 初始化 ====================
 document.getElementById('currentDate').textContent = new Date().toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric',weekday:'long'});
 
-// 关闭模态框的点击事件
 document.getElementById('modalOverlay').addEventListener('click', function(e) {
   if(e.target === this) closeModal();
 });
 
-// 初始渲染
-loadData();
-renderPage();
+// 启动：先尝试数据迁移，再渲染页面
+(async function init() {
+  try {
+    // 先检测服务器连接
+    await api('GET', '/all-data');
+    serverConnected = true;
+    updateSyncStatus();
+
+    // 自动迁移 localStorage 数据到后端（仅首次）
+    await migrateIfNeeded();
+
+    // 渲染首页
+    renderPage();
+  } catch (err) {
+    // 后端不可用，降级到 localStorage 模式
+    console.warn('后端不可用，使用 localStorage:', err.message);
+    serverConnected = false;
+    updateSyncStatus();
+    renderPage();
+  }
+})();
 
 // 窗口大小改变时重绘图表
 window.addEventListener('resize', ()=>{
