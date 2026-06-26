@@ -333,7 +333,16 @@ function invalidateCache() {
 function loadFromLocalStorage() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw) {
-    try { return JSON.parse(raw); } catch(e) {}
+    try {
+      const data = JSON.parse(raw);
+      // 防御性检查：确保关键字段存在且为数组
+      if (data && Array.isArray(data.projects) && Array.isArray(data.costRecords) && Array.isArray(data.transactions)) {
+        return data;
+      }
+      console.warn('localStorage 数据格式不兼容，重置为默认数据');
+    } catch(e) {
+      console.warn('localStorage 数据解析失败，重置为默认数据');
+    }
   }
   const data = getDefaultData();
   saveToLocalStorage(data);
@@ -703,7 +712,12 @@ async function viewProjectDetail(id) {
 
 // ==================== 成本记录 ====================
 function renderCosts(data) {
-  const projectOptions = '<option value="all">全部项目</option>' + data.projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  // 防御性检查
+  if (!data || !Array.isArray(data.costRecords)) {
+    console.error('renderCosts: 无效的数据格式', data);
+    return `<h2 style="margin-bottom:20px;">💰 成本记录</h2><div class="card"><p style="padding:30px;text-align:center;color:var(--text-light);">数据加载异常，请尝试清除浏览器缓存后刷新页面</p></div>`;
+  }
+  const projectOptions = '<option value="all">全部项目</option>' + (data.projects||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
   const costTypeOptions = '<option value="all">全部类型</option>' + Object.entries(COST_TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
 
   const filterBar = `
